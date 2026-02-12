@@ -330,3 +330,61 @@ func TestGoBuildStrategy_Filter_FailureWithNoise(t *testing.T) {
 		t.Error("noise lines should be stripped")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// GoTestStrategy — additional edge cases
+// ---------------------------------------------------------------------------
+
+func TestGoTestStrategy_Filter_Subtests(t *testing.T) {
+	s := &GoTestStrategy{}
+
+	// A test run with subtests where one subtest fails. The parent test
+	// also reports FAIL because a child failed. The filter should capture
+	// the failing subtest block (TestParent/SubB) and the parent FAIL.
+	// We include enough package summary lines (>= 3) and enough total
+	// lines (>= 10) to exceed the small-output threshold.
+	input := "=== RUN   TestParent\n" +
+		"    setup log line\n" +
+		"=== RUN   TestParent/SubA\n" +
+		"--- PASS: TestParent/SubA (0.00s)\n" +
+		"=== RUN   TestParent/SubB\n" +
+		"    parent_test.go:15: assertion failed\n" +
+		"--- FAIL: TestParent/SubB (0.01s)\n" +
+		"--- FAIL: TestParent (0.02s)\n" +
+		"FAIL\n" +
+		"FAIL\texample.com/pkg\t0.03s\n" +
+		"ok  \texample.com/other\t0.01s\n" +
+		"ok  \texample.com/utils\t0.02s\n" +
+		"FAIL\n"
+
+	result := s.Filter([]byte(input), "go", []string{"test", "./..."}, 1)
+
+	// The failing subtest block should be captured. The filter tracks
+	// test blocks by "=== RUN" lines, so TestParent/SubB starts a new
+	// block that includes the error detail and "--- FAIL:" line.
+	if !strings.Contains(result.Filtered, "=== RUN   TestParent/SubB") {
+		t.Errorf("failing subtest RUN line should be preserved, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "parent_test.go:15: assertion failed") {
+		t.Errorf("failing subtest error detail should be preserved, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "--- FAIL: TestParent/SubB") {
+		t.Errorf("failing subtest FAIL line should be preserved, got:\n%s", result.Filtered)
+	}
+
+	// Package summaries should be preserved
+	if !strings.Contains(result.Filtered, "FAIL\texample.com/pkg\t0.03s") {
+		t.Errorf("failing package summary should be preserved, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "ok  \texample.com/other\t0.01s") {
+		t.Errorf("passing package summary should be preserved, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "ok  \texample.com/utils\t0.02s") {
+		t.Errorf("passing package summary should be preserved, got:\n%s", result.Filtered)
+	}
+
+	// The passing subtest details should be stripped
+	if strings.Contains(result.Filtered, "--- PASS: TestParent/SubA") {
+		t.Error("passing subtest PASS line should be stripped on failure")
+	}
+}

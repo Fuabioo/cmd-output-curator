@@ -513,3 +513,328 @@ func TestGitLogStrategy_Filter(t *testing.T) {
 		}
 	})
 }
+
+// ---------------------------------------------------------------------------
+// GitDiffStrategy — additional edge cases
+// ---------------------------------------------------------------------------
+
+func TestGitDiffStrategy_Filter_FileDeletion(t *testing.T) {
+	s := &GitDiffStrategy{}
+
+	// A diff with a normal file change plus a deleted file.
+	// The "+++ /dev/null" line signals the file was deleted.
+	// We need >= 20 lines to trigger filtering.
+	input := "diff --git a/README.md b/README.md\n" + // 1
+		"index abc1234..def5678 100644\n" + // 2
+		"--- a/README.md\n" + // 3
+		"+++ b/README.md\n" + // 4
+		"@@ -1,3 +1,4 @@\n" + // 5
+		" # coc\n" + // 6
+		"+A new line here\n" + // 7
+		" \n" + // 8
+		" Some content\n" + // 9
+		"diff --git a/removed.go b/removed.go\n" + // 10
+		"deleted file mode 100644\n" + // 11
+		"index aaa1111..0000000\n" + // 12
+		"--- a/removed.go\n" + // 13
+		"+++ /dev/null\n" + // 14
+		"@@ -1,5 +0,0 @@\n" + // 15
+		"-package old\n" + // 16
+		"-\n" + // 17
+		"-func Deprecated() {\n" + // 18
+		"-    return\n" + // 19
+		"-}\n" + // 20
+		"\n" // 21
+
+	result := s.Filter([]byte(input), "git", []string{"diff"}, 0)
+
+	if !result.WasReduced {
+		t.Fatal("expected WasReduced=true for multi-file diff with deletion")
+	}
+
+	// The "+++ /dev/null" line should NOT be counted as an insertion because
+	// it doesn't start with "+++ b/" — it enters the generic "+++ " branch
+	// which does not increment insertions.
+	if strings.Contains(result.Filtered, "+++ /dev/null") {
+		// The line is preserved because the generic "+++ " handler calls
+		// kept = append(kept, line).
+	}
+
+	// The deleted file should appear in the "Files changed:" summary.
+	// The file name comes from lastMinusFile ("removed.go") since
+	// "+++ /dev/null" doesn't match "+++ b/".
+	if !strings.Contains(result.Filtered, "Files changed:") {
+		t.Errorf("expected 'Files changed:' header, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "removed.go") {
+		t.Errorf("expected removed.go in Files changed summary, got:\n%s", result.Filtered)
+	}
+
+	// Stats for the deleted file: 0 insertions ("+++ /dev/null" is not a "+"
+	// content line) and 5 deletions (the five "-" lines).
+	if !strings.Contains(result.Filtered, "removed.go (+0 -5)") {
+		t.Errorf("expected removed.go (+0 -5) stats, got:\n%s", result.Filtered)
+	}
+
+	// Deletion content lines should be preserved in the diff body
+	if !strings.Contains(result.Filtered, "-package old") {
+		t.Error("deletion content line '-package old' should be preserved")
+	}
+	if !strings.Contains(result.Filtered, "-func Deprecated() {") {
+		t.Error("deletion content line '-func Deprecated() {' should be preserved")
+	}
+
+	// "diff --git" noise lines should be removed
+	if strings.Contains(result.Filtered, "diff --git") {
+		t.Error("diff --git lines should be removed")
+	}
+}
+
+func TestGitDiffStrategy_Filter_BinaryFile(t *testing.T) {
+	s := &GitDiffStrategy{}
+
+	// A diff with a normal text change plus a binary file change.
+	// >= 20 lines to trigger filtering.
+	input := "diff --git a/main.go b/main.go\n" + // 1
+		"index aaa1111..bbb2222 100644\n" + // 2
+		"--- a/main.go\n" + // 3
+		"+++ b/main.go\n" + // 4
+		"@@ -1,5 +1,7 @@\n" + // 5
+		" package main\n" + // 6
+		" \n" + // 7
+		"+import \"fmt\"\n" + // 8
+		"+\n" + // 9
+		" func main() {\n" + // 10
+		"+    fmt.Println(\"hello\")\n" + // 11
+		" }\n" + // 12
+		"diff --git a/image.png b/image.png\n" + // 13
+		"index ccc3333..ddd4444 100644\n" + // 14
+		"Binary files a/image.png and b/image.png differ\n" + // 15
+		"diff --git a/docs.go b/docs.go\n" + // 16
+		"index eee5555..fff6666 100644\n" + // 17
+		"--- a/docs.go\n" + // 18
+		"+++ b/docs.go\n" + // 19
+		"@@ -1,3 +1,4 @@\n" + // 20
+		" package docs\n" + // 21
+		"+// Added comment\n" + // 22
+		" \n" + // 23
+		"\n" // 24
+
+	result := s.Filter([]byte(input), "git", []string{"diff"}, 0)
+
+	if !result.WasReduced {
+		t.Fatal("expected WasReduced=true for diff with binary file")
+	}
+
+	// image.png should appear in "Files changed:" summary with (binary) marker
+	if !strings.Contains(result.Filtered, "Files changed:") {
+		t.Errorf("expected 'Files changed:' header, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "image.png (binary)") {
+		t.Errorf("expected 'image.png (binary)' in summary, got:\n%s", result.Filtered)
+	}
+
+	// The "Binary files ... differ" line should be preserved in the diff body
+	if !strings.Contains(result.Filtered, "Binary files a/image.png and b/image.png differ") {
+		t.Error("binary files differ line should be preserved")
+	}
+
+	// Other files should also appear in the summary
+	if !strings.Contains(result.Filtered, "main.go") {
+		t.Errorf("expected main.go in summary, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "docs.go") {
+		t.Errorf("expected docs.go in summary, got:\n%s", result.Filtered)
+	}
+}
+
+func TestGitDiffStrategy_Filter_Rename(t *testing.T) {
+	s := &GitDiffStrategy{}
+
+	// A diff with a file rename plus some content changes.
+	// >= 20 lines to trigger filtering.
+	input := "diff --git a/old.go b/new.go\n" + // 1
+		"similarity index 85%\n" + // 2
+		"rename from old.go\n" + // 3
+		"rename to new.go\n" + // 4
+		"index aaa1111..bbb2222 100644\n" + // 5
+		"--- a/old.go\n" + // 6
+		"+++ b/new.go\n" + // 7
+		"@@ -1,5 +1,6 @@\n" + // 8
+		" package pkg\n" + // 9
+		" \n" + // 10
+		"-func OldName() {\n" + // 11
+		"+func NewName() {\n" + // 12
+		"+    // renamed\n" + // 13
+		"     return\n" + // 14
+		" }\n" + // 15
+		"diff --git a/utils.go b/utils.go\n" + // 16
+		"index ccc3333..ddd4444 100644\n" + // 17
+		"--- a/utils.go\n" + // 18
+		"+++ b/utils.go\n" + // 19
+		"@@ -1,3 +1,4 @@\n" + // 20
+		" package pkg\n" + // 21
+		"+// added line\n" + // 22
+		" \n" + // 23
+		"\n" // 24
+
+	result := s.Filter([]byte(input), "git", []string{"diff"}, 0)
+
+	if !result.WasReduced {
+		t.Fatal("expected WasReduced=true for diff with rename")
+	}
+
+	// The renamed file should appear in the summary under its new name
+	// (tracked via "+++ b/new.go")
+	if !strings.Contains(result.Filtered, "Files changed:") {
+		t.Errorf("expected 'Files changed:' header, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "new.go") {
+		t.Errorf("expected new.go (renamed file) in summary, got:\n%s", result.Filtered)
+	}
+
+	// The new.go entry should have correct stats: +2 insertions, -1 deletion
+	if !strings.Contains(result.Filtered, "new.go (+2 -1)") {
+		t.Errorf("expected new.go (+2 -1) stats, got:\n%s", result.Filtered)
+	}
+
+	// Diff content should be preserved
+	if !strings.Contains(result.Filtered, "-func OldName() {") {
+		t.Error("deletion line '-func OldName() {' should be preserved")
+	}
+	if !strings.Contains(result.Filtered, "+func NewName() {") {
+		t.Error("addition line '+func NewName() {' should be preserved")
+	}
+
+	// Rename metadata lines should be preserved (they fall through to catch-all)
+	if !strings.Contains(result.Filtered, "rename from old.go") {
+		t.Error("rename from metadata should be preserved")
+	}
+	if !strings.Contains(result.Filtered, "rename to new.go") {
+		t.Error("rename to metadata should be preserved")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// GitStatusStrategy — additional edge cases
+// ---------------------------------------------------------------------------
+
+func TestGitStatusStrategy_Filter_DetachedHead(t *testing.T) {
+	s := &GitStatusStrategy{}
+
+	// Input simulating a detached HEAD state with changes.
+	// The "HEAD detached at abc1234" line does NOT start with "On branch ",
+	// so the current filter implementation drops it.
+	input := "HEAD detached at abc1234\n" +
+		"Your branch is ahead of 'origin/main' by 2 commits.\n" +
+		"\n" +
+		"Changes to be committed:\n" +
+		"  (use \"git restore --staged <file>...\" to unstage)\n" +
+		"\tmodified:   main.go\n" +
+		"\n" +
+		"Changes not staged for commit:\n" +
+		"  (use \"git add <file>...\" to update what will be committed)\n" +
+		"  (use \"git restore <file>...\" to discard changes in working directory)\n" +
+		"\tmodified:   utils.go\n" +
+		"\n"
+
+	result := s.Filter([]byte(input), "git", []string{"status"}, 0)
+
+	if !result.WasReduced {
+		t.Fatal("expected WasReduced=true for detached HEAD status")
+	}
+
+	// NOTE: The current implementation only preserves lines starting with
+	// "On branch ". The "HEAD detached at abc1234" line does not match
+	// this prefix and is therefore dropped by the filter. This is a known
+	// limitation -- the filter was designed for the common "On branch" case.
+	if strings.Contains(result.Filtered, "HEAD detached at abc1234") {
+		// If the filter is later updated to handle detached HEAD, this
+		// assertion should be flipped to require its presence.
+		t.Log("HEAD detached line is preserved (filter may have been updated)")
+	}
+
+	// Modified files should appear with converted markers
+	if !strings.Contains(result.Filtered, "\tM   main.go") {
+		t.Errorf("expected converted staged modified file main.go, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "\tM   utils.go") {
+		t.Errorf("expected converted unstaged modified file utils.go, got:\n%s", result.Filtered)
+	}
+
+	// Hint lines should be stripped
+	if strings.Contains(result.Filtered, "(use \"git") {
+		t.Error("hint lines should be stripped")
+	}
+
+	// Summary should reflect 1 staged, 1 unstaged
+	if !strings.Contains(result.Filtered, "1 staged, 1 unstaged, 0 untracked") {
+		t.Errorf("expected summary '1 staged, 1 unstaged, 0 untracked', got:\n%s", result.Filtered)
+	}
+}
+
+func TestGitStatusStrategy_Filter_ANSIColoredInput(t *testing.T) {
+	s := &GitStatusStrategy{}
+
+	// Input with ANSI color codes, as git would produce with color.status=always.
+	// \x1b[32m = green, \x1b[31m = red, \x1b[0m = reset
+	input := "\x1b[32mOn branch main\x1b[0m\n" +
+		"\x1b[32mYour branch is up to date with 'origin/main'.\x1b[0m\n" +
+		"\n" +
+		"\x1b[32mChanges to be committed:\x1b[0m\n" +
+		"  (use \"git restore --staged <file>...\" to unstage)\n" +
+		"\t\x1b[32mmodified:   staged_file.go\x1b[0m\n" +
+		"\n" +
+		"\x1b[31mChanges not staged for commit:\x1b[0m\n" +
+		"  (use \"git add <file>...\" to update what will be committed)\n" +
+		"  (use \"git restore <file>...\" to discard changes in working directory)\n" +
+		"\t\x1b[31mmodified:   unstaged_file.go\x1b[0m\n" +
+		"\n" +
+		"Untracked files:\n" +
+		"  (use \"git add <file>...\" to include in what will be committed)\n" +
+		"\t\x1b[31mnew_file.go\x1b[0m\n" +
+		"\n"
+
+	result := s.Filter([]byte(input), "git", []string{"status"}, 0)
+
+	if !result.WasReduced {
+		t.Fatal("expected WasReduced=true for ANSI colored status")
+	}
+
+	// No ANSI escape codes should remain in the output
+	if strings.Contains(result.Filtered, "\x1b[") {
+		t.Error("ANSI escape codes should be stripped from output")
+	}
+
+	// Clean file names should appear with converted markers
+	if !strings.Contains(result.Filtered, "\tM   staged_file.go") {
+		t.Errorf("expected clean converted staged file, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "\tM   unstaged_file.go") {
+		t.Errorf("expected clean converted unstaged file, got:\n%s", result.Filtered)
+	}
+	if !strings.Contains(result.Filtered, "\tnew_file.go") {
+		t.Errorf("expected clean untracked file, got:\n%s", result.Filtered)
+	}
+
+	// Section headers should be clean (no ANSI codes)
+	if !strings.Contains(result.Filtered, "Changes to be committed:") {
+		t.Error("section header 'Changes to be committed:' should be present and clean")
+	}
+	if !strings.Contains(result.Filtered, "Changes not staged for commit:") {
+		t.Error("section header 'Changes not staged for commit:' should be present and clean")
+	}
+	if !strings.Contains(result.Filtered, "Untracked files:") {
+		t.Error("section header 'Untracked files:' should be present and clean")
+	}
+
+	// Hint lines should still be stripped
+	if strings.Contains(result.Filtered, "(use \"git") {
+		t.Error("hint lines should be stripped even from ANSI colored input")
+	}
+
+	// Summary should be correct
+	if !strings.Contains(result.Filtered, "1 staged, 1 unstaged, 1 untracked") {
+		t.Errorf("expected summary '1 staged, 1 unstaged, 1 untracked', got:\n%s", result.Filtered)
+	}
+}

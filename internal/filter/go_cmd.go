@@ -2,9 +2,15 @@ package filter
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 )
+
+// goValueFlags are go global flags that consume the next argument as a value.
+var goValueFlags = map[string]bool{
+	"-C": true,
+}
 
 // ---------------------------------------------------------------------------
 // GoTestStrategy
@@ -16,7 +22,7 @@ type GoTestStrategy struct{}
 func (s *GoTestStrategy) Name() string { return "go-test" }
 
 func (s *GoTestStrategy) CanHandle(command string, args []string) bool {
-	return command == "go" && isSubcommand(args, "test")
+	return command == "go" && isSubcommand(args, "test", goValueFlags)
 }
 
 // Package-level compiled regexes for GoTestStrategy.
@@ -30,8 +36,10 @@ var (
 )
 
 func (s *GoTestStrategy) Filter(raw []byte, command string, args []string, exitCode int) (result Result) {
+	filterName := s.Name()
 	defer func() {
 		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "coc: filter %s recovered from panic: %v\n", filterName, r)
 			result = Result{Filtered: string(raw), WasReduced: false}
 		}
 	}()
@@ -175,21 +183,19 @@ func (s *GoBuildStrategy) CanHandle(command string, args []string) bool {
 	if command != "go" {
 		return false
 	}
-	for _, a := range args {
-		if strings.HasPrefix(a, "-") {
-			continue
-		}
-		return a == "build" || a == "vet" || a == "install"
-	}
-	return false
+	return isSubcommand(args, "build", goValueFlags) ||
+		isSubcommand(args, "vet", goValueFlags) ||
+		isSubcommand(args, "install", goValueFlags)
 }
 
 // goBuildErrorRe matches compiler-style error lines: file.go:line:col: message
 var goBuildErrorRe = regexp.MustCompile(`^\S+\.go:\d+:\d+:`)
 
 func (s *GoBuildStrategy) Filter(raw []byte, command string, args []string, exitCode int) (result Result) {
+	filterName := s.Name()
 	defer func() {
 		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "coc: filter %s recovered from panic: %v\n", filterName, r)
 			result = Result{Filtered: string(raw), WasReduced: false}
 		}
 	}()

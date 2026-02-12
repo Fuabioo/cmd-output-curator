@@ -2,7 +2,9 @@ package filter
 
 import (
 	"fmt"
+	"os"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -16,15 +18,16 @@ var gitValueFlags = map[string]bool{
 }
 
 // isSubcommand finds the first non-flag argument in args and checks if it matches subcmd.
-// It understands that certain flags (like git's -c) consume the next argument.
-func isSubcommand(args []string, subcmd string) bool {
+// It understands that certain flags (like git's -c or go's -C) consume the next argument.
+// The valueFlags parameter specifies which flags consume a following value argument.
+func isSubcommand(args []string, subcmd string, valueFlags map[string]bool) bool {
 	skip := false
 	for _, a := range args {
 		if skip {
 			skip = false
 			continue
 		}
-		if gitValueFlags[a] {
+		if valueFlags[a] {
 			skip = true
 			continue
 		}
@@ -59,12 +62,14 @@ type GitStatusStrategy struct{}
 func (s *GitStatusStrategy) Name() string { return "git-status" }
 
 func (s *GitStatusStrategy) CanHandle(command string, args []string) bool {
-	return command == "git" && isSubcommand(args, "status")
+	return command == "git" && isSubcommand(args, "status", gitValueFlags)
 }
 
 func (s *GitStatusStrategy) Filter(raw []byte, command string, args []string, exitCode int) (result Result) {
+	filterName := s.Name()
 	defer func() {
 		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "coc: filter %s recovered from panic: %v\n", filterName, r)
 			result = Result{Filtered: string(raw), WasReduced: false}
 		}
 	}()
@@ -186,15 +191,26 @@ type GitDiffStrategy struct{}
 func (s *GitDiffStrategy) Name() string { return "git-diff" }
 
 func (s *GitDiffStrategy) CanHandle(command string, args []string) bool {
-	return command == "git" && isSubcommand(args, "diff")
+	return command == "git" && isSubcommand(args, "diff", gitValueFlags)
 }
 
 // indexLineRe matches "index <hash>..<hash>" lines in git diff output.
 var indexLineRe = regexp.MustCompile(`^index [0-9a-f]+\.\.[0-9a-f]+`)
 
+// binaryFileRe matches binary file diff lines like "Binary files a/foo.png and b/foo.png differ".
+var binaryFileRe = regexp.MustCompile(`^Binary files .* differ$`)
+
+// binaryFileNameRe extracts filenames from binary file diff lines (prefers b/ side).
+var binaryFileNameRe = regexp.MustCompile(`^Binary files (?:a/\S+ and )?b/(\S+) differ$`)
+
+// binaryFileNameFallbackRe extracts filename from the a/ side when b/ side is /dev/null.
+var binaryFileNameFallbackRe = regexp.MustCompile(`^Binary files a/(\S+) and /dev/null differ$`)
+
 func (s *GitDiffStrategy) Filter(raw []byte, command string, args []string, exitCode int) (result Result) {
+	filterName := s.Name()
 	defer func() {
 		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "coc: filter %s recovered from panic: %v\n", filterName, r)
 			result = Result{Filtered: string(raw), WasReduced: false}
 		}
 	}()
@@ -214,10 +230,12 @@ func (s *GitDiffStrategy) Filter(raw []byte, command string, args []string, exit
 		name       string
 		insertions int
 		deletions  int
+		binary     bool
 	}
 	var fileStats []fileStat
 	var currentFile *fileStat
 	var kept []string
+	var lastMinusFile string
 
 	for _, line := range lines {
 		// Remove "diff --git a/... b/..." lines
@@ -230,17 +248,53 @@ func (s *GitDiffStrategy) Filter(raw []byte, command string, args []string, exit
 			continue
 		}
 
-		// Track files from --- / +++ lines
-		if strings.HasPrefix(line, "+++ b/") {
-			name := strings.TrimPrefix(line, "+++ b/")
-			fs := fileStat{name: name}
+		// Binary file diffs: "Binary files a/foo.png and b/foo.png differ"
+		if binaryFileRe.MatchString(line) {
+			name := ""
+			if m := binaryFileNameRe.FindStringSubmatch(line); len(m) > 1 {
+				name = m[1]
+			} else if m := binaryFileNameFallbackRe.FindStringSubmatch(line); len(m) > 1 {
+				name = m[1]
+			}
+			if name != "" {
+				fs := fileStat{name: name, binary: true}
+				fileStats = append(fileStats, fs)
+			}
+			kept = append(kept, line)
+			continue
+		}
+
+		// Track the --- a/filename for use by +++ /dev/null
+		if after, ok := strings.CutPrefix(line, "--- a/"); ok {
+			lastMinusFile = after
+			kept = append(kept, line)
+			continue
+		}
+
+		// Track files from +++ b/ lines (normal case)
+		if after, ok := strings.CutPrefix(line, "+++ b/"); ok {
+			fs := fileStat{name: after}
 			fileStats = append(fileStats, fs)
 			currentFile = &fileStats[len(fileStats)-1]
 			kept = append(kept, line)
 			continue
 		}
 
+		// Handle +++ /dev/null (file deletion) — must come before generic "+" counting
+		if strings.HasPrefix(line, "+++ ") {
+			// This handles "+++ /dev/null" and any other non-"b/" +++ lines
+			if lastMinusFile != "" {
+				fs := fileStat{name: lastMinusFile}
+				fileStats = append(fileStats, fs)
+				currentFile = &fileStats[len(fileStats)-1]
+			}
+			kept = append(kept, line)
+			continue
+		}
+
+		// Handle --- /dev/null and other non-"a/" --- lines
 		if strings.HasPrefix(line, "--- ") {
+			lastMinusFile = ""
 			kept = append(kept, line)
 			continue
 		}
@@ -275,7 +329,11 @@ func (s *GitDiffStrategy) Filter(raw []byte, command string, args []string, exit
 	var header []string
 	header = append(header, "Files changed:")
 	for _, fs := range fileStats {
-		header = append(header, fmt.Sprintf("  %s (+%d -%d)", fs.name, fs.insertions, fs.deletions))
+		if fs.binary {
+			header = append(header, fmt.Sprintf("  %s (binary)", fs.name))
+		} else {
+			header = append(header, fmt.Sprintf("  %s (+%d -%d)", fs.name, fs.insertions, fs.deletions))
+		}
 	}
 	header = append(header, "")
 
@@ -296,15 +354,17 @@ type GitLogStrategy struct{}
 func (s *GitLogStrategy) Name() string { return "git-log" }
 
 func (s *GitLogStrategy) CanHandle(command string, args []string) bool {
-	return command == "git" && isSubcommand(args, "log")
+	return command == "git" && isSubcommand(args, "log", gitValueFlags)
 }
 
 // commitHashRe matches full commit hash lines like "commit abc123...".
 var commitHashRe = regexp.MustCompile(`^commit ([0-9a-f]{40})`)
 
 func (s *GitLogStrategy) Filter(raw []byte, command string, args []string, exitCode int) (result Result) {
+	filterName := s.Name()
 	defer func() {
 		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "coc: filter %s recovered from panic: %v\n", filterName, r)
 			result = Result{Filtered: string(raw), WasReduced: false}
 		}
 	}()
@@ -315,13 +375,9 @@ func (s *GitLogStrategy) Filter(raw []byte, command string, args []string, exitC
 	lines := strings.Split(cleaned, "\n")
 
 	// Check if already --oneline format (no "commit " prefix lines)
-	hasFullCommitLine := false
-	for _, line := range lines {
-		if commitHashRe.MatchString(line) {
-			hasFullCommitLine = true
-			break
-		}
-	}
+	hasFullCommitLine := slices.ContainsFunc(lines, func(line string) bool {
+		return commitHashRe.MatchString(line)
+	})
 	if !hasFullCommitLine {
 		return Result{Filtered: cleaned, WasReduced: false}
 	}
@@ -350,10 +406,9 @@ func (s *GitLogStrategy) Filter(raw []byte, command string, args []string, exitC
 			continue
 		}
 
-		if strings.HasPrefix(line, "Author:") {
+		if after, ok := strings.CutPrefix(line, "Author:"); ok {
 			// Extract just the name (before the email)
-			authorField := strings.TrimPrefix(line, "Author:")
-			authorField = strings.TrimSpace(authorField)
+			authorField := strings.TrimSpace(after)
 			if idx := strings.Index(authorField, " <"); idx >= 0 {
 				authorField = authorField[:idx]
 			}
@@ -361,8 +416,8 @@ func (s *GitLogStrategy) Filter(raw []byte, command string, args []string, exitC
 			continue
 		}
 
-		if strings.HasPrefix(line, "Date:") {
-			current.date = strings.TrimSpace(strings.TrimPrefix(line, "Date:"))
+		if after, ok := strings.CutPrefix(line, "Date:"); ok {
+			current.date = strings.TrimSpace(after)
 			continue
 		}
 

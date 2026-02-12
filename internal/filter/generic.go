@@ -2,6 +2,7 @@ package filter
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 )
@@ -30,8 +31,10 @@ var genericErrorPatterns = []*regexp.Regexp{
 }
 
 func (s *GenericErrorStrategy) Filter(raw []byte, command string, args []string, exitCode int) (result Result) {
+	filterName := s.Name()
 	defer func() {
 		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "coc: filter %s recovered from panic: %v\n", filterName, r)
 			result = Result{Filtered: string(raw), WasReduced: false}
 		}
 	}()
