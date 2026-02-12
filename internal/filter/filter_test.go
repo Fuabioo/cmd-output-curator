@@ -73,11 +73,11 @@ func TestRegistry(t *testing.T) {
 		}
 	})
 
-	t.Run("default registry returns passthrough", func(t *testing.T) {
+	t.Run("default registry returns generic-error for unknown commands", func(t *testing.T) {
 		r := DefaultRegistry()
 		s := r.Find("anything", nil)
-		if s.Name() != "passthrough" {
-			t.Errorf("DefaultRegistry.Find = %q, want passthrough", s.Name())
+		if s.Name() != "generic-error" {
+			t.Errorf("DefaultRegistry.Find = %q, want generic-error", s.Name())
 		}
 	})
 
@@ -133,6 +133,49 @@ func TestRegistry(t *testing.T) {
 			t.Errorf("CanHandle received args %v, want [status -s]", m.lastArgs)
 		}
 	})
+}
+
+func TestRegistryPriority(t *testing.T) {
+	r := DefaultRegistry()
+
+	tests := []struct {
+		name         string
+		command      string
+		args         []string
+		wantStrategy string
+	}{
+		// Git strategies
+		{"git status", "git", []string{"status"}, "git-status"},
+		{"git status short", "git", []string{"status", "-s"}, "git-status"},
+		{"git diff", "git", []string{"diff"}, "git-diff"},
+		{"git diff cached", "git", []string{"diff", "--cached"}, "git-diff"},
+		{"git log", "git", []string{"log"}, "git-log"},
+		{"git log oneline", "git", []string{"log", "--oneline"}, "git-log"},
+		// Go strategies
+		{"go test", "go", []string{"test"}, "go-test"},
+		{"go test all", "go", []string{"test", "./..."}, "go-test"},
+		{"go build", "go", []string{"build"}, "go-build"},
+		{"go build all", "go", []string{"build", "./..."}, "go-build"},
+		{"go vet", "go", []string{"vet"}, "go-build"},
+		{"go vet all", "go", []string{"vet", "./..."}, "go-build"},
+		{"go install", "go", []string{"install"}, "go-build"},
+		// Unknown commands should get generic-error (last registered strategy that matches anything)
+		{"unknown command", "unknown", nil, "generic-error"},
+		{"cargo build", "cargo", []string{"build"}, "generic-error"},
+		{"npm test", "npm", []string{"test"}, "generic-error"},
+		// Git subcommands without specific strategies should get generic-error
+		{"git commit", "git", []string{"commit"}, "generic-error"},
+		{"git push", "git", []string{"push"}, "generic-error"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s := r.Find(tc.command, tc.args)
+			if s.Name() != tc.wantStrategy {
+				t.Errorf("Find(%q, %v) = %q, want %q", tc.command, tc.args, s.Name(), tc.wantStrategy)
+			}
+		})
+	}
 }
 
 // mockStrategy is a test helper implementing Strategy.
