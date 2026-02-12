@@ -744,14 +744,9 @@ func TestGitStatusStrategy_Filter_DetachedHead(t *testing.T) {
 		t.Fatal("expected WasReduced=true for detached HEAD status")
 	}
 
-	// NOTE: The current implementation only preserves lines starting with
-	// "On branch ". The "HEAD detached at abc1234" line does not match
-	// this prefix and is therefore dropped by the filter. This is a known
-	// limitation -- the filter was designed for the common "On branch" case.
-	if strings.Contains(result.Filtered, "HEAD detached at abc1234") {
-		// If the filter is later updated to handle detached HEAD, this
-		// assertion should be flipped to require its presence.
-		t.Log("HEAD detached line is preserved (filter may have been updated)")
+	// The "HEAD detached at abc1234" line should be preserved.
+	if !strings.Contains(result.Filtered, "HEAD detached at abc1234") {
+		t.Errorf("expected 'HEAD detached at abc1234' to be preserved, got:\n%s", result.Filtered)
 	}
 
 	// Modified files should appear with converted markers

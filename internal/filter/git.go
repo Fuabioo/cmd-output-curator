@@ -112,8 +112,10 @@ func (s *GitStatusStrategy) Filter(raw []byte, command string, args []string, ex
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
 
-		// Keep "On branch ..." line
-		if strings.HasPrefix(line, "On branch ") {
+		// Keep "On branch ..." or "HEAD detached ..." line
+		if strings.HasPrefix(line, "On branch ") ||
+			strings.HasPrefix(line, "HEAD detached at ") ||
+			strings.HasPrefix(line, "HEAD detached from ") {
 			out = append(out, line)
 			continue
 		}
