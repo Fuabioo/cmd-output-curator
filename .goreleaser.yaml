@@ -1,0 +1,59 @@
+version: 2
+
+project_name: coc
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - main: .
+    binary: coc
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/Fuabioo/coc/internal/cli.Version={{.Version}}
+      - -X github.com/Fuabioo/coc/internal/cli.Commit={{.ShortCommit}}
+
+archives:
+  - format: tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^fix"
+      order: 1
+    - title: Others
+      order: 999
+
+brews:
+  - repository:
+      owner: Fuabioo
+      name: homebrew-tap
+    homepage: "https://github.com/Fuabioo/coc"
+    description: "CMD Output Curator — curate CLI output for AI agents"
+    license: "MIT"
+    install: |
+      bin.install "coc"
+    test: |
+      system "#{bin}/coc", "version"

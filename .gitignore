@@ -1,0 +1,18 @@
+# Build artifacts
+bin/
+dist/
+
+# Test artifacts
+coverage/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor files
+*.swp
+*.swo
+*~
+
+# Log files from coc itself
+*.log
