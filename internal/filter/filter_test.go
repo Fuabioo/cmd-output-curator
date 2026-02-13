@@ -168,6 +168,9 @@ func TestRegistryPriority(t *testing.T) {
 		// Docker strategies
 		{"docker build", "docker", []string{"build", "."}, "docker-build"},
 		{"docker compose build", "docker", []string{"compose", "build"}, "docker-build"},
+		// Grep/rg strategies
+		{"grep pattern", "grep", []string{"-rn", "pattern", "."}, "grep-group"},
+		{"rg pattern", "rg", []string{"pattern"}, "grep-group"},
 		// Progress strip strategies
 		{"npm install", "npm", []string{"install"}, "progress-strip"},
 		{"docker pull", "docker", []string{"pull", "alpine"}, "progress-strip"},
