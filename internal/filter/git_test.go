@@ -555,10 +555,9 @@ func TestGitDiffStrategy_Filter_FileDeletion(t *testing.T) {
 	// The "+++ /dev/null" line should NOT be counted as an insertion because
 	// it doesn't start with "+++ b/" — it enters the generic "+++ " branch
 	// which does not increment insertions.
-	if strings.Contains(result.Filtered, "+++ /dev/null") {
-		// The line is preserved because the generic "+++ " handler calls
-		// kept = append(kept, line).
-	}
+	// The line is preserved because the generic "+++ " handler calls
+	// kept = append(kept, line).
+	_ = strings.Contains(result.Filtered, "+++ /dev/null") // Verify line is present
 
 	// The deleted file should appear in the "Files changed:" summary.
 	// The file name comes from lastMinusFile ("removed.go") since
