@@ -69,6 +69,7 @@ snapshot:
 
 changelog:
   use: github
+  format: "{{ .SHA }}: {{ .Message }} (@{{ .AuthorUsername }})"
   sort: asc
   filters:
     exclude:
