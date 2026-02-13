@@ -107,4 +107,4 @@ brews:
     install: |
       bin.install "coc"
     test: |
-      system "#{bin}/coc", "version"
+      system "#{bin}/coc", "--version"
