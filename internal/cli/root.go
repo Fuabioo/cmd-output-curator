@@ -28,7 +28,7 @@ func (e *exitError) Error() string {
 }
 
 func newRootCmd() *cobra.Command {
-	return &cobra.Command{
+	root := &cobra.Command{
 		Use:                "coc [flags] <command> [args...]",
 		Short:              "CMD Output Curator -- curate CLI output for AI agents",
 		Long:               "coc proxies CLI commands, tees output to log files, and filters stdout for reduced token consumption by AI agents.",
@@ -37,6 +37,12 @@ func newRootCmd() *cobra.Command {
 		DisableFlagParsing: true,
 		RunE:               runRoot,
 	}
+
+	// Add subcommands (these have normal flag parsing)
+	root.AddCommand(hookCmd)
+	root.AddCommand(initCmd)
+
+	return root
 }
 
 // Execute runs the CLI and returns the process exit code.

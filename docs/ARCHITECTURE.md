@@ -17,7 +17,7 @@ No circular dependencies. Each package has a single responsibility.
 | Package | Responsibility | Key Types |
 |---------|---------------|-----------|
 | `main.go` | Entry point | — |
-| `internal/cli` | Cobra commands, global flags, version | `rootCmd`, `Version`, `Commit` |
+| `internal/cli` | Cobra commands, global flags, version, hook handler, init command | `rootCmd`, `hookCmd`, `initCmd`, `Version`, `Commit` |
 | `internal/executor` | MultiWriter tee, command execution, signal forwarding | `Config`, `Result`, `Run()` |
 | `internal/filter` | Strategy interface, registry, all filters, ANSI stripping | `Strategy`, `Registry`, `Result` |
 | `internal/logpath` | Log path resolution, slug, session ID | `Resolve()`, `CreateLogFile()` |
@@ -39,6 +39,25 @@ coc <command> [args...]
         ├── stderr → MultiWriter → log file + os.Stderr
         │
         └── wait → exit code → footer (if reduced) → os.Exit
+```
+
+### Hook Path (Agent Integration)
+
+```
+Claude Code (Bash tool invocation)
+        │
+        ▼
+   PreToolUse hook → coc hook (reads JSON from stdin)
+        │
+        ├── unsupported command → exit silently (no rewrite)
+        │
+        └── supported command → JSON response with "coc <command>" rewrite
+                                        │
+                                        ▼
+                                Claude Code executes rewritten command
+                                        │
+                                        ▼
+                                Normal coc data flow (above)
 ```
 
 ## Dependencies

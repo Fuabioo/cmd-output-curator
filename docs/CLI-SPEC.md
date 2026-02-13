@@ -6,6 +6,15 @@
 coc [flags] <command> [args...]
 ```
 
+## Subcommands
+
+```
+  version            Show coc version
+  hook               Claude Code PreToolUse hook handler (reads JSON from stdin)
+  init               Install coc hook into Claude Code settings
+  init --uninstall   Remove coc hook from Claude Code settings
+```
+
 ## Global Flags
 
 | Flag | Description | Default |
@@ -66,3 +75,28 @@ Footer only appears on stderr when `WasReduced == true`.
 | Variable | Description |
 |----------|-------------|
 | `COC_LOG_DIR` | Override default log directory |
+
+## Agent Integration
+
+coc integrates with Claude Code via a PreToolUse hook that transparently wraps supported commands.
+
+### Setup
+
+```bash
+coc init              # Install the hook
+coc init --uninstall  # Remove the hook
+```
+
+### How It Works
+
+1. Claude Code invokes a Bash command (e.g., `git status`)
+2. The PreToolUse hook runs `coc hook`, piping the tool input as JSON to stdin
+3. `coc hook` checks if the command is supported (git, go, cargo, docker, grep, rg, npm, pip, pip3, yarn)
+4. If supported and not a shell pipeline, it returns JSON rewriting the command to `coc git status`
+5. Claude Code executes the rewritten command, getting filtered output
+
+### Supported Commands
+
+git, go, cargo, docker, grep, rg, npm, pip, pip3, yarn
+
+Commands with shell operators (|, &&, ||, ;, $(), backticks) are not wrapped.
