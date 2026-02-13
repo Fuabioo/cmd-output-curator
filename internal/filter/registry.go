@@ -25,7 +25,7 @@ func (r *Registry) Find(command string, args []string) Strategy {
 }
 
 // DefaultRegistry returns a registry with all built-in strategies.
-// Phase 2: git, go, and generic error filters.
+// Phase 3: git, go, cargo, docker, progress, and generic error filters.
 func DefaultRegistry() *Registry {
 	return NewRegistry(
 		// Git strategies (most specific first)
@@ -35,6 +35,13 @@ func DefaultRegistry() *Registry {
 		// Go strategies
 		&GoTestStrategy{},
 		&GoBuildStrategy{},
+		// Cargo strategies
+		&CargoTestStrategy{},
+		&CargoBuildStrategy{},
+		// Docker strategies
+		&DockerBuildStrategy{},
+		// Progress strip (package managers, docker pull/push)
+		&ProgressStripStrategy{},
 		// Generic fallback (must be last among non-passthrough)
 		&GenericErrorStrategy{},
 	)

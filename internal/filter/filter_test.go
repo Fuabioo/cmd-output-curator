@@ -159,9 +159,21 @@ func TestRegistryPriority(t *testing.T) {
 		{"go vet", "go", []string{"vet"}, "go-build"},
 		{"go vet all", "go", []string{"vet", "./..."}, "go-build"},
 		{"go install", "go", []string{"install"}, "go-build"},
+		// Cargo strategies
+		{"cargo test", "cargo", []string{"test"}, "cargo-test"},
+		{"cargo test all", "cargo", []string{"test", "--all"}, "cargo-test"},
+		{"cargo build", "cargo", []string{"build"}, "cargo-build"},
+		{"cargo check", "cargo", []string{"check"}, "cargo-build"},
+		{"cargo clippy", "cargo", []string{"clippy"}, "cargo-build"},
+		// Docker strategies
+		{"docker build", "docker", []string{"build", "."}, "docker-build"},
+		{"docker compose build", "docker", []string{"compose", "build"}, "docker-build"},
+		// Progress strip strategies
+		{"npm install", "npm", []string{"install"}, "progress-strip"},
+		{"docker pull", "docker", []string{"pull", "alpine"}, "progress-strip"},
+		{"pip install", "pip", []string{"install", "requests"}, "progress-strip"},
 		// Unknown commands should get generic-error (last registered strategy that matches anything)
 		{"unknown command", "unknown", nil, "generic-error"},
-		{"cargo build", "cargo", []string{"build"}, "generic-error"},
 		{"npm test", "npm", []string{"test"}, "generic-error"},
 		// Git subcommands without specific strategies should get generic-error
 		{"git commit", "git", []string{"commit"}, "generic-error"},
