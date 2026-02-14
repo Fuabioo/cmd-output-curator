@@ -35,6 +35,7 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:       true,
 		SilenceErrors:      true,
 		DisableFlagParsing: true,
+		Args:               cobra.ArbitraryArgs,
 		RunE:               runRoot,
 	}
 
